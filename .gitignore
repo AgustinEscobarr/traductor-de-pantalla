@@ -1,0 +1,4 @@
+build/
+salida/
+__pycache__/
+*.pyc

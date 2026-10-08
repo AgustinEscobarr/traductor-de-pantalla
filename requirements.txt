@@ -1,0 +1,5 @@
+mss
+pillow
+requests
+rapidocr
+onnxruntime
