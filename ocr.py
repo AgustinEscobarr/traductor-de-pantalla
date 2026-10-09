@@ -2,11 +2,22 @@
 y agrupado de líneas en bloques."""
 
 import statistics
+import threading
 from dataclasses import dataclass, field
 
 from PIL import Image
 
 import config
+
+
+# Escrituras que no separan las palabras con espacios: puntuación CJK, kana japonés, ideogramas
+# chinos/japoneses y signos de ancho completo.
+_TRAMOS_CJK = [("\u3000", "\u30ff"), ("\u3400", "\u9fff"), ("\uf900", "\ufaff"), ("\uff00", "\uffef")]
+RANGO_CJK = "".join(f"{a}-{b}" for a, b in _TRAMOS_CJK)  # para usar dentro de [...] en una regex
+
+
+def es_cjk(caracter: str) -> bool:
+    return any(a <= caracter <= b for a, b in _TRAMOS_CJK)
 
 
 class ErrorOcr(RuntimeError):
@@ -36,6 +47,8 @@ class Bloque:
         for linea in self.lineas:
             if texto.endswith("-") and linea.texto[:1].islower():
                 texto = texto[:-1] + linea.texto  # palabra cortada con guion
+            elif texto and es_cjk(texto[-1]) and es_cjk(linea.texto[0]):
+                texto += linea.texto  # en chino y japonés no se separan las líneas con espacio
             else:
                 texto = f"{texto} {linea.texto}" if texto else linea.texto
         return texto
@@ -55,6 +68,7 @@ class Bloque:
 
 
 _motor = None
+_candado = threading.Lock()  # el modo automático usa el OCR desde su propio hilo
 
 
 def _obtener_motor():
@@ -71,6 +85,7 @@ def _obtener_motor():
                 # y sin mejorar la lectura de texto de pantalla.
                 "Det.limit_type": "max",
                 "Det.limit_side_len": config.LADO_MAXIMO_OCR,
+                "EngineConfig.onnxruntime.intra_op_num_threads": config.HILOS_OCR,
             })
         except Exception as e:
             raise ErrorOcr(f"No se pudo cargar el motor de OCR ({e}).") from e
@@ -79,7 +94,8 @@ def _obtener_motor():
 
 def precargar():
     """Carga el modelo de antemano para que la primera traducción no espere."""
-    _obtener_motor()
+    with _candado:
+        _obtener_motor()
 
 
 def reconocer_lineas(imagen: Image.Image) -> list[Linea]:
@@ -87,7 +103,8 @@ def reconocer_lineas(imagen: Image.Image) -> list[Linea]:
 
     Las cajas de RapidOCR incluyen un pequeño margen alrededor de las letras.
     """
-    resultado = _obtener_motor()(imagen.convert("RGB"))
+    with _candado:
+        resultado = _obtener_motor()(imagen.convert("RGB"))
     if resultado.boxes is None or resultado.txts is None:
         return []
     lineas = []
@@ -127,5 +144,26 @@ def agrupar_en_bloques(lineas: list[Linea]) -> list[Bloque]:
     return bloques
 
 
-def reconocer(imagen: Image.Image) -> list[Bloque]:
-    return agrupar_en_bloques(reconocer_lineas(imagen))
+def clave(bloques: list[Bloque]) -> str:
+    """El texto leído sin espacios ni signos, para comparar lecturas: sobre un video, el OCR
+    varía en esos detalles de un cuadro a otro."""
+    return "".join(c.lower() for b in bloques for c in b.texto if c.isalnum())
+
+
+def reconocer(imagen: Image.Image, lado_maximo: int | None = None) -> list[Bloque]:
+    """Con `lado_maximo`, una imagen más grande se achica antes del OCR (para el modo video:
+    una franja de 1080p se lee 2,5 veces más rápido y igual de bien) y las cajas se devuelven
+    en coordenadas de la imagen original."""
+    escala = 1.0
+    if lado_maximo and max(imagen.size) > lado_maximo:
+        escala = lado_maximo / max(imagen.size)
+        imagen = imagen.resize(
+            (max(1, round(imagen.width * escala)), max(1, round(imagen.height * escala))),
+            Image.BILINEAR,
+        )
+    lineas = reconocer_lineas(imagen)
+    if escala != 1.0:
+        lineas = [
+            Linea(l.texto, l.x0 / escala, l.y0 / escala, l.x1 / escala, l.y1 / escala) for l in lineas
+        ]
+    return agrupar_en_bloques(lineas)

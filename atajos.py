@@ -48,13 +48,18 @@ class AtajosGlobales:
     def detener(self):
         if self._id_hilo:
             _user32.PostThreadMessageW(self._id_hilo, WM_QUIT, 0, 0)
+            self._hilo.join(1)  # que los atajos queden libres antes de volver a registrarlos
 
     def _bucle(self):
         # RegisterHotKey asocia el atajo al hilo que lo registra: los mensajes llegan a este bucle.
         self._id_hilo = _kernel32.GetCurrentThreadId()
         registrados = {}
         for i, (atajo, callback) in enumerate(self._atajos, start=1):
-            mods, vk = parsear(atajo)
+            try:
+                mods, vk = parsear(atajo)
+            except ValueError:
+                self.fallidos.append(atajo)  # mal escrito en el archivo de ajustes
+                continue
             if _user32.RegisterHotKey(None, i, mods | MOD_NOREPEAT, vk):
                 registrados[i] = callback
             else:

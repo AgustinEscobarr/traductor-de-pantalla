@@ -1,26 +1,44 @@
 """Dibuja la traducción sobre la captura y la muestra encima de la región original."""
 
+import re
 import statistics
 import tkinter as tk
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 import config
+import ocr
+import ventanas
 
-_fuentes: dict[int, ImageFont.FreeTypeFont] = {}
+_fuentes: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}
+
+# Dónde se puede cortar una línea: entre palabras o, en chino y japonés, entre dos caracteres cualesquiera.
+_UNIDADES = re.compile(rf"\s+|[{ocr.RANGO_CJK}]|[^\s{ocr.RANGO_CJK}]+")
 
 
 def _fuente(tamano: int):
-    if tamano not in _fuentes:
-        for ruta in config.FUENTES:
+    """Fuente para el idioma de destino actual (Segoe UI no tiene caracteres chinos ni japoneses)."""
+    idioma = config.IDIOMA_DESTINO.split("-")[0]
+    clave = (idioma, tamano)
+    if clave not in _fuentes:
+        for ruta in config.FUENTES_POR_IDIOMA.get(idioma, []) + config.FUENTES:
             try:
-                _fuentes[tamano] = ImageFont.truetype(ruta, tamano)
+                _fuentes[clave] = ImageFont.truetype(ruta, tamano)
                 break
             except OSError:
                 continue
         else:
-            _fuentes[tamano] = ImageFont.load_default(tamano)
-    return _fuentes[tamano]
+            _fuentes[clave] = ImageFont.load_default(tamano)
+    return _fuentes[clave]
+
+
+def color_tk(color) -> str:
+    return "#%02x%02x%02x" % tuple(color[:3])
+
+
+def lienzo_transparente(tamano) -> Image.Image:
+    """Imagen vacía para el overlay del modo automático: todo su color se vuelve transparente."""
+    return Image.new("RGB", tamano, config.COLOR_TRANSPARENTE)
 
 
 def _luminancia(color):
@@ -65,15 +83,18 @@ def _color_texto(imagen: Image.Image, caja, fondo):
 
 def _partir_en_lineas(draw, texto, fuente, ancho):
     lineas, actual = [], ""
-    for palabra in texto.split():
-        prueba = f"{actual} {palabra}" if actual else palabra
+    for unidad in _UNIDADES.findall(texto):
+        if unidad.isspace():
+            actual = f"{actual} " if actual else actual
+            continue
+        prueba = actual + unidad
         if actual and draw.textlength(prueba, font=fuente) > ancho:
-            lineas.append(actual)
-            actual = palabra
+            lineas.append(actual.rstrip())
+            actual = unidad
         else:
             actual = prueba
     if actual:
-        lineas.append(actual)
+        lineas.append(actual.rstrip())
     return lineas
 
 
@@ -91,19 +112,42 @@ def _ajustar(draw, texto, ancho, alto, tamano_inicial):
         tamano -= 1
 
 
-def renderizar(imagen: Image.Image, bloques, traducciones) -> Image.Image:
+def _caja(bloque, tamano):
+    """La caja del bloque agrandada 1 px y recortada a la imagen, o None si queda vacía."""
+    x0, y0, x1, y1 = (round(v) for v in bloque.caja)
+    x0, y0 = max(x0 - 1, 0), max(y0 - 1, 0)
+    x1, y1 = min(x1 + 1, tamano[0]), min(y1 + 1, tamano[1])
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
+
+
+def renderizar(imagen: Image.Image, bloques, traducciones, transparente=False, tapar=None) -> Image.Image:
+    """Dibuja cada traducción sobre un recuadro del color de fondo, encima de su texto original.
+
+    Con `transparente` los recuadros se dibujan sobre COLOR_TRANSPARENTE en vez de sobre la
+    captura: el overlay del modo automático deja ver en vivo todo lo demás.
+
+    `tapar` = (imagen, bloques) del texto que hay ahora en pantalla (modo video): se cubre con su
+    color de fondo antes de dibujar, porque la traducción que se muestra va atrasada y es de otro
+    subtítulo. Por eso también se dibujan los bloques que no cambian al traducirse.
+    """
     original = imagen.convert("RGB")
-    salida = original.copy()
+    salida = lienzo_transparente(original.size) if transparente else original.copy()
     draw = ImageDraw.Draw(salida)
+    if tapar is not None:
+        actual, bloques_actuales = tapar[0].convert("RGB"), tapar[1]
+        for bloque in bloques_actuales:
+            caja = _caja(bloque, actual.size)
+            if caja:
+                draw.rectangle(caja, fill=_color_fondo(actual, caja))
     for bloque, traduccion in zip(bloques, traducciones):
-        if not traduccion or traduccion == bloque.texto:
+        if not traduccion or (traduccion == bloque.texto and tapar is None):
             continue
-        x0, y0, x1, y1 = (round(v) for v in bloque.caja)
-        x0, y0 = max(x0 - 1, 0), max(y0 - 1, 0)
-        x1, y1 = min(x1 + 1, original.width), min(y1 + 1, original.height)
-        if x1 <= x0 or y1 <= y0:
+        caja = _caja(bloque, original.size)
+        if caja is None:
             continue
-        caja = (x0, y0, x1, y1)
+        x0, y0, x1, y1 = caja
         fondo = _color_fondo(original, caja)
         color = _color_texto(original, caja, fondo)
 
@@ -197,6 +241,33 @@ class Overlay:
         if self.ventana:
             self.ventana.destroy()
         self.ventana = self.etiqueta = None
+
+    def mostrar_atravesable(self, region) -> bool:
+        """Overlay del modo automático: transparente salvo los recuadros traducidos, no recibe
+        clics ni foco y no sale en las capturas (así se puede seguir leyendo el texto que tapa).
+
+        Devuelve False si Windows no permite excluirlo de las capturas.
+        """
+        self.cerrar()
+        x, y, w, h = region
+        self.original = lienzo_transparente((w, h))
+        self.traducida = None
+        self.viendo_original = False
+
+        transparente = color_tk(config.COLOR_TRANSPARENTE)
+        self.ventana = tk.Toplevel(self.root)
+        self.ventana.overrideredirect(True)
+        self.ventana.attributes("-topmost", True)
+        self.ventana.attributes("-transparentcolor", transparente)
+        self.ventana.geometry(f"{w}x{h}+{x}+{y}")
+        self.etiqueta = tk.Label(self.ventana, bd=0, highlightthickness=0, bg=transparente)
+        self.etiqueta.pack(fill="both", expand=True)
+        self._poner_imagen(con_borde(self.original))
+        if not ventanas.excluir_de_captura(self.ventana):
+            self.cerrar()
+            return False
+        ventanas.hacer_atravesable(self.ventana)
+        return True
 
     @property
     def visible(self):

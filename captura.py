@@ -3,7 +3,11 @@
 import tkinter as tk
 
 import mss
-from PIL import Image, ImageEnhance, ImageTk
+from PIL import Image, ImageChops, ImageEnhance, ImageTk
+
+ANCHO_FIRMA = 160
+DIFERENCIA_PIXEL = 24  # de 0 a 255: menos que esto es ruido (compresión de video, cursor que parpadea)
+PROPORCION_CAMBIO = 0.003  # fracción de píxeles distintos a partir de la cual la imagen "cambió"
 
 
 def capturar(region=None):
@@ -20,13 +24,29 @@ def capturar(region=None):
     return Image.frombytes("RGB", foto.size, foto.bgra, "raw", "BGRX"), region
 
 
+def firma(imagen: Image.Image) -> Image.Image:
+    """Versión chica en grises de la imagen, para comparar rápido si cambió."""
+    ancho = min(ANCHO_FIRMA, imagen.width)
+    alto = max(1, round(imagen.height * ancho / imagen.width))
+    return imagen.convert("L").resize((ancho, alto), Image.BILINEAR)
+
+
+def cambio(a: Image.Image, b: Image.Image) -> bool:
+    if a.size != b.size:
+        return True
+    distintos = ImageChops.difference(a, b).point(lambda v: 255 if v > DIFERENCIA_PIXEL else 0)
+    return distintos.histogram()[255] > a.width * a.height * PROPORCION_CAMBIO
+
+
 class SelectorRegion:
     """Muestra la captura a pantalla completa oscurecida y deja marcar un rectángulo.
 
     Llama a `al_terminar(region, recorte)`, o a `al_terminar(None, None)` si se cancela (Esc / click derecho).
     """
 
-    def __init__(self, root: tk.Tk, captura: Image.Image, origen, al_terminar):
+    MENSAJE = "Arrastrá para marcar el texto a traducir"
+
+    def __init__(self, root: tk.Tk, captura: Image.Image, origen, al_terminar, mensaje=MENSAJE):
         self.captura = captura
         self.ox, self.oy, w, h = origen
         self.al_terminar = al_terminar
@@ -49,7 +69,7 @@ class SelectorRegion:
         self.canvas.create_image(0, 0, image=self.foto_fondo, anchor="nw")
         self.canvas.create_text(  # centrado en el monitor principal, que empieza en (0, 0)
             root.winfo_screenwidth() // 2 - self.ox, 30 - self.oy,
-            text="Arrastrá para marcar el texto a traducir  ·  Esc para cancelar",
+            text=f"{mensaje}  ·  Esc para cancelar",
             fill="white", font=("Segoe UI", 13, "bold"),
         )
 

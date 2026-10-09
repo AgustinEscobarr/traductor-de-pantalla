@@ -12,7 +12,8 @@ import sys
 import venv
 from pathlib import Path
 
-VERSION = "1.0.0"
+from config import VERSION  # la misma que usa la app para avisar de versiones nuevas
+
 NOMBRE = "TraductorDePantalla"
 
 RAIZ = Path(__file__).resolve().parent
@@ -110,7 +111,7 @@ def probar_exe():
     if salida:
         print("  " + salida.replace("\n", "\n  "))
     if resultado.returncode == 2:
-        print("  Aviso: el OCR anduvo, pero no hubo conexión con Google Translate.")
+        print("  Aviso: el OCR anduvo, pero algún servicio de traducción falló (ver arriba).")
     elif resultado.returncode != 0:
         sys.exit(f"El .exe empaquetado falló la autoprueba (código {resultado.returncode}).")
 
