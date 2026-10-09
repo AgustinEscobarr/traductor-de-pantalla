@@ -143,8 +143,11 @@ def compilar_instalador():
 
 
 if __name__ == "__main__":
-    paso("1/5 Entorno virtual de construcción")
-    preparar_entorno()
+    if Path(sys.prefix).resolve() != VENV.resolve():
+        paso("1/5 Entorno virtual de construcción")
+        preparar_entorno()
+        # El resto corre dentro del entorno, que es el que tiene Pillow y PyInstaller.
+        sys.exit(subprocess.run([str(PYTHON_VENV), __file__]).returncode)
     paso("2/5 Ícono")
     generar_icono()
     preparar_icono()
