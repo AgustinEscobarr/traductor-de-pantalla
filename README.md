@@ -61,7 +61,7 @@ Para subtítulos que cambian rápido, como los de una película o una serie, pre
 - Lee la zona varias veces por segundo y traduce cada subtítulo apenas aparece.
 - **Cada traducción queda en pantalla el mismo tiempo que estuvo el subtítulo original**, así tienes el mismo tiempo para leerla. Las traducciones van un poco atrasadas respecto del video (un segundo y medio, más o menos), y el subtítulo original siguiente queda tapado mientras lees la traducción anterior.
 - Nunca acorta un subtítulo ni un silencio para ganar tiempo. Si una traducción tarda en llegar (por ejemplo, si Google demora), el subtítulo anterior queda más tiempo en pantalla y desde ahí el resto sigue con ese atraso. Si el atraso te molesta, apaga el modo y vuelve a encenderlo.
-- Usa más procesador que el modo automático, porque lee la pantalla muy seguido.
+- Usa más procesador que el modo automático, porque lee la pantalla muy seguido: mientras el video se mueve ocupa más o menos un núcleo del procesador.
 - Para subtítulos que aparecen palabra por palabra, como los automáticos de YouTube, conviene el modo automático.
 - Para apagarlo, presiona **■ Video** o `Ctrl+Alt+S` otra vez. Los modos automático y video no funcionan a la vez: al activar uno se apaga el otro.
 

@@ -67,17 +67,16 @@ class Bloque:
         return statistics.median(l.alto for l in self.lineas)
 
 
-_motor = None
+_motores = {}  # un motor por cantidad de hilos (el modo video usa uno propio, ver HILOS_OCR_VIDEO)
 _candado = threading.Lock()  # el modo automático usa el OCR desde su propio hilo
 
 
-def _obtener_motor():
-    global _motor
-    if _motor is None:
+def _obtener_motor(hilos: int):
+    if hilos not in _motores:
         try:
             from rapidocr import RapidOCR  # import pesado: se hace en el hilo de trabajo
 
-            _motor = RapidOCR(params={
+            _motores[hilos] = RapidOCR(params={
                 "Global.use_cls": False,  # el texto de pantalla es horizontal
                 "Global.log_level": "error",
                 "Global.text_score": config.CONFIANZA_MINIMA_OCR,
@@ -85,26 +84,32 @@ def _obtener_motor():
                 # y sin mejorar la lectura de texto de pantalla.
                 "Det.limit_type": "max",
                 "Det.limit_side_len": config.LADO_MAXIMO_OCR,
-                "EngineConfig.onnxruntime.intra_op_num_threads": config.HILOS_OCR,
+                "EngineConfig.onnxruntime.intra_op_num_threads": hilos,
             })
         except Exception as e:
             raise ErrorOcr(f"No se pudo cargar el motor de OCR ({e}).") from e
-    return _motor
+    return _motores[hilos]
 
 
 def precargar():
     """Carga el modelo de antemano para que la primera traducción no espere."""
     with _candado:
-        _obtener_motor()
+        _obtener_motor(config.HILOS_OCR)
 
 
-def reconocer_lineas(imagen: Image.Image) -> list[Linea]:
+def liberar(hilos: int):
+    """Descarta el motor de esa cantidad de hilos para devolver su memoria."""
+    with _candado:
+        _motores.pop(hilos, None)
+
+
+def reconocer_lineas(imagen: Image.Image, hilos: int | None = None) -> list[Linea]:
     """Devuelve las líneas de texto con sus cajas en coordenadas de `imagen`.
 
     Las cajas de RapidOCR incluyen un pequeño margen alrededor de las letras.
     """
     with _candado:
-        resultado = _obtener_motor()(imagen.convert("RGB"))
+        resultado = _obtener_motor(hilos or config.HILOS_OCR)(imagen.convert("RGB"))
     if resultado.boxes is None or resultado.txts is None:
         return []
     lineas = []
@@ -150,10 +155,12 @@ def clave(bloques: list[Bloque]) -> str:
     return "".join(c.lower() for b in bloques for c in b.texto if c.isalnum())
 
 
-def reconocer(imagen: Image.Image, lado_maximo: int | None = None) -> list[Bloque]:
+def reconocer(
+    imagen: Image.Image, lado_maximo: int | None = None, hilos: int | None = None
+) -> list[Bloque]:
     """Con `lado_maximo`, una imagen más grande se achica antes del OCR (para el modo video:
     una franja de 1080p se lee 2,5 veces más rápido y igual de bien) y las cajas se devuelven
-    en coordenadas de la imagen original."""
+    en coordenadas de la imagen original. `hilos` elige el motor (por defecto HILOS_OCR)."""
     escala = 1.0
     if lado_maximo and max(imagen.size) > lado_maximo:
         escala = lado_maximo / max(imagen.size)
@@ -161,7 +168,7 @@ def reconocer(imagen: Image.Image, lado_maximo: int | None = None) -> list[Bloqu
             (max(1, round(imagen.width * escala)), max(1, round(imagen.height * escala))),
             Image.BILINEAR,
         )
-    lineas = reconocer_lineas(imagen)
+    lineas = reconocer_lineas(imagen, hilos)
     if escala != 1.0:
         lineas = [
             Linea(l.texto, l.x0 / escala, l.y0 / escala, l.x1 / escala, l.y1 / escala) for l in lineas

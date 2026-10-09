@@ -80,6 +80,11 @@ CONFIANZA_MINIMA_OCR = 0.5
 # girando en espera: el modo video llegaba a ocupar 8 núcleos; con 2 ocupa unos 2 y cada lectura
 # tarda ~25 ms más.
 HILOS_OCR = 2
+# El modo video lee casi sin pausa (el video que se mueve detrás del subtítulo cuenta como cambio),
+# así que ahí importa más el procesador que gasta cada lectura que lo que tarda: con 2 hilos gasta
+# ~2,5 veces lo que dura; con 1 hilo tarda ~50% más pero gasta ~35% menos, y el modo pasa de ocupar
+# unos 2,4 núcleos a uno. Usa un motor de OCR aparte (~43 MB, se libera al apagar el modo).
+HILOS_OCR_VIDEO = 1
 
 # Color del borde que marca la región traducida.
 COLOR_BORDE = (59, 130, 246)

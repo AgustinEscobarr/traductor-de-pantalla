@@ -98,7 +98,9 @@ class Lector(threading.Thread):
                 sin_cambios = firma_leida is not None and not captura.cambio(firma, firma_leida)
                 if sin_cambios and not vistos:
                     continue
-                bloques = ocr.reconocer(imagen, lado_maximo=config.LADO_OCR_TIEMPO_REAL)
+                bloques = ocr.reconocer(
+                    imagen, lado_maximo=config.LADO_OCR_TIEMPO_REAL, hilos=config.HILOS_OCR_VIDEO
+                )
                 firma_leida = firma
                 actual = ocr.clave(bloques)
                 if tapado is None or not parecidas(actual, tapado):
@@ -129,6 +131,9 @@ class Lector(threading.Thread):
                 # cada (intervalo + OCR); la pausa mínima deja respirar al procesador.
                 transcurrido = time.monotonic() - momento
                 espera = max(PAUSA_MINIMA, config.INTERVALO_TIEMPO_REAL_MS / 1000 - transcurrido)
+        # Desde este hilo, para no descartar el motor en medio de una lectura.
+        if config.HILOS_OCR_VIDEO != config.HILOS_OCR:  # si no, es el motor de los demás modos
+            ocr.liberar(config.HILOS_OCR_VIDEO)
 
 
 class Reproductor:
