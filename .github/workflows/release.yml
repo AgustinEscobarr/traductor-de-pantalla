@@ -1,0 +1,48 @@
+# Crea la release con el instalador al subir una etiqueta de versión:
+#   git tag v1.2.0
+#   git push origin v1.2.0
+# La etiqueta tiene que coincidir con VERSION de config.py.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write  # para crear la release y subirle el instalador
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Comprobar que la etiqueta coincide con config.VERSION
+        shell: bash
+        run: |
+          VERSION=$(python -c "from config import VERSION; print(VERSION)")
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con VERSION = \"$VERSION\" de config.py"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Instalar Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Construir el instalador
+        run: python construir.py
+
+      - name: Crear la release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "salida/TraductorDePantalla-Setup-$VERSION.exe" \
+            --title "Traductor de pantalla $VERSION" \
+            --generate-notes
