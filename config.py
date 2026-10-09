@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 REPOSITORIO = "AgustinEscobarr/traductor-de-pantalla"  # de acá se consultan las versiones nuevas
 
 # Idiomas de la traducción (códigos de Google Translate). "auto" detecta el idioma de origen.
